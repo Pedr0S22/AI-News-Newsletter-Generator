@@ -93,7 +93,7 @@ else:
         author = art.get("author") or source_name
         published_date = str(art.get("published_at"))[:10]
         summary = art.get("summary")
-        canonical_url = art.get("canonical_url", "#")
+        article_url = art.get("canonical_url") or art.get("original_url") or "#"
 
         with st.container(border=True):
             # Header line: Source badge, date, author
@@ -113,7 +113,7 @@ else:
             # Action bar: Original link & Newsletter selection
             col_link, col_select = st.columns([0.7, 0.3])
             with col_link:
-                st.link_button("Read Original Article ↗", canonical_url)
+                st.link_button("Read Original Article ↗", article_url)
             with col_select:
                 is_selected = st.checkbox(
                     "Select for Newsletter",

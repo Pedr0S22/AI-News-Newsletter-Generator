@@ -10,6 +10,7 @@ class ArticleResponse(BaseModel):
     id: uuid.UUID
     source: str
     canonical_url: str
+    original_url: Optional[str] = None
     title: str
     summary: Optional[str] = None
     author: Optional[str] = None

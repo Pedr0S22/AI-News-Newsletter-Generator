@@ -56,11 +56,14 @@ class CrawlerService:
 
             # 2. In-memory pre-deduplication against Database
             existing_urls_query = (
-                self.db.query(Article.canonical_url)
-                .filter(Article.canonical_url.in_(candidate_urls))
+                self.db.query(Article.canonical_url, Article.original_url)
+                .filter(
+                    (Article.canonical_url.in_(candidate_urls))
+                    | (Article.original_url.in_(candidate_urls))
+                )
                 .all()
             )
-            existing_urls = {r[0] for r in existing_urls_query}
+            existing_urls = {u for row in existing_urls_query for u in row if u}
             total_skipped_existing += len(existing_urls)
 
             new_urls = [u for u in candidate_urls if u not in existing_urls]
@@ -85,7 +88,7 @@ class CrawlerService:
                     markdown_content = ""
 
                 # 4. Strict publication date parsing
-                published_at = parse_published_date(metadata, markdown_content)
+                published_at = parse_published_date(metadata, markdown_content, url=url)
                 if not published_at:
                     logger.warning(f"Skipping article from {source.name} (no publishedAt found): {url}")
                     total_skipped_missing_date += 1
@@ -103,10 +106,12 @@ class CrawlerService:
 
                 # 6. Extract fields and build auditable entity
                 raw_canonical = metadata.get("canonical") or metadata.get("og:url") or url
-                canonical_url = normalize_url(raw_canonical, base_url=url)
+                canonical_url = normalize_url(raw_canonical, base_url=url) or url
 
                 # Guard in case canonical_url redirected to an existing database entry
-                if canonical_url in existing_urls or self.db.query(Article).filter(Article.canonical_url == canonical_url).first():
+                if canonical_url in existing_urls or self.db.query(Article).filter(
+                    (Article.canonical_url == canonical_url) | (Article.original_url == canonical_url)
+                ).first():
                     total_skipped_existing += 1
                     continue
 
@@ -118,6 +123,7 @@ class CrawlerService:
                 article_record = Article(
                     source=source.name,
                     canonical_url=canonical_url,
+                    original_url=url,
                     title=title.strip()[:512],
                     summary=summary.strip() if summary else None,
                     author=author[:256],

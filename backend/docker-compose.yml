@@ -22,6 +22,7 @@ services:
       - "${CRAWL4AI_PORT:-11235}:11235"
     environment:
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-crawl4ai_secret_token}
+      CRAWL4AI_ALLOW_INTERNAL_URLS: "true"
     shm_size: 1gb
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]

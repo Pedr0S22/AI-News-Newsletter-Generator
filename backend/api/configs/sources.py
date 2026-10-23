@@ -26,7 +26,7 @@ SOURCES: list[NewsSource] = [
     ),
     NewsSource(
         name="Google AI Blog",
-        hub_url="https://blog.google/innovation-and-ai/models-and-research/ ",
+        hub_url="https://blog.google/innovation-and-ai/models-and-research/",
         article_url_pattern=r"^https://blog\.google/innovation-and-ai/models-and-research/[a-zA-Z0-9_-]+/?$",
     ),
     NewsSource(
@@ -37,7 +37,7 @@ SOURCES: list[NewsSource] = [
     NewsSource(
         name="BBC AI News",
         hub_url="https://www.bbc.com/news/topics/ce1qrvleleqt",
-        article_url_pattern=r"^https://www\.bbc\.com/news/topics/ce1qrvleleqt/[a-zA-Z0-9_-]+/?$",
+        article_url_pattern=r"^https://www\.bbc\.com/news/(articles/|topics/ce1qrvleleqt/)[a-zA-Z0-9_-]+/?$",
     ),
     NewsSource(
         name="Hugging Face Blog",

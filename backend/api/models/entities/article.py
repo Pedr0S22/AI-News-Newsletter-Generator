@@ -13,6 +13,7 @@ class Article(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source = Column(String(128), nullable=False)
     canonical_url = Column(String(1024), unique=True, index=True, nullable=False)
+    original_url = Column(String(1024), nullable=True)
     title = Column(String(512), nullable=False)
     summary = Column(Text, nullable=True)
     author = Column(String(256), nullable=True)
