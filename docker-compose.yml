@@ -1,44 +1,9 @@
+include:
+  - path: ./backend/docker-compose.yml
+  - path: ./frontend/docker-compose.yml
+
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: ai_news_backend
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    environment:
-      - ENVIRONMENT=development
-      - DATABASE_URL=sqlite:////app/data/ai_news.db
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-4o-mini}
-    volumes:
-      - ./backend:/app
-      - backend_data:/app/data
-    restart: unless-stopped
-    networks:
-      - app_network
-
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: ai_news_frontend
-    ports:
-      - "${FRONTEND_PORT:-8501}:8501"
-    environment:
-      - BACKEND_API_URL=http://backend:8000/api/v1
-    volumes:
-      - ./frontend:/app
     depends_on:
-      - backend
-    restart: unless-stopped
-    networks:
-      - app_network
-
-volumes:
-  backend_data:
-
-networks:
-  app_network:
-    driver: bridge
+      api:
+        condition: service_healthy

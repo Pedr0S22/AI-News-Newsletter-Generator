@@ -1,0 +1,19 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_news_frontend
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    env_file:
+      - .env
+    environment:
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://api:8000}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
