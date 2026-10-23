@@ -112,14 +112,15 @@ class CrawlerService:
 
                 title = metadata.get("title") or metadata.get("og:title") or url
                 summary = metadata.get("description") or metadata.get("og:description") or None
-                author = metadata.get("author") or None
+                raw_author = metadata.get("author")
+                author = raw_author.strip() if raw_author and str(raw_author).strip() else source.name
 
                 article_record = Article(
                     source=source.name,
                     canonical_url=canonical_url,
                     title=title.strip()[:512],
                     summary=summary.strip() if summary else None,
-                    author=author.strip()[:256] if author else None,
+                    author=author[:256],
                     article=markdown_content,
                     published_at=published_at,
                 )

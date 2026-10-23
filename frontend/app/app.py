@@ -2,76 +2,125 @@ import streamlit as st
 from client import client
 
 st.set_page_config(
-    page_title="AI News - Ingestion Dashboard",
-    page_icon="🤖",
+    page_title="AI News Editor Dashboard",
+    page_icon="📰",
     layout="wide",
 )
 
-st.title("🤖 AI News Generator — Dashboard & Ingestion")
-st.caption(f"Connected to Backend API: `{client.base_url}`")
+# Maintain selected articles in session state for future newsletter synthesis
+if "selected_articles" not in st.session_state:
+    st.session_state.selected_articles = set()
 
-# 1. Healthcheck Status
-is_healthy, payload, err = client.check_health()
-if is_healthy and payload:
-    st.success("Backend API is online and healthy", icon="🟢")
-else:
-    st.error(f"Cannot reach Backend API at `{client.base_url}`: {err}", icon="🔴")
+# Header
+st.title("📰 AI News Curation Dashboard")
+st.caption("Review recent announcements from primary AI research blogs and curate stories for the newsletter.")
 
-st.divider()
+# 1. Action Toolbar
+col_fetch, col_refresh, col_metrics = st.columns([0.22, 0.18, 0.6])
 
-# 2. Ingestion Trigger Section
-col_btn, col_info = st.columns([0.3, 0.7])
+with col_fetch:
+    if st.button("🚀 Fetch Latest News", type="primary", use_container_width=True):
+        with st.spinner("Crawling configured sources for new articles..."):
+            success, result, err = client.trigger_ingestion()
+            if success and result:
+                new_count = result.get("ingested_count", 0)
+                st.toast(f"Ingestion complete: {new_count} new articles added!", icon="🎉")
+                st.rerun()
+            else:
+                st.error(f"Ingestion failed: {err}")
 
-with col_btn:
-    trigger_clicked = st.button("🚀 Run Crawl4AI Ingestion", type="primary")
+with col_refresh:
+    if st.button("🔄 Refresh Feed", use_container_width=True):
+        st.rerun()
 
-with col_info:
-    st.info(
-        "Crawls configured seed sources (OpenAI, Anthropic, DeepMind), performs in-memory "
-        "URL deduplication against PostgreSQL, filters by publication date, and saves clean Markdown."
+# Fetch latest articles
+articles = client.get_articles(limit=100)
+
+with col_metrics:
+    selected_count = len(st.session_state.selected_articles)
+    st.markdown(
+        f"**Stories in Feed:** `{len(articles)}` &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"**Selected for Newsletter:** `{selected_count}`"
     )
 
-if trigger_clicked:
-    with st.spinner("Crawl4AI pipeline executing (discovering links, deduplicating, scraping content)..."):
-        success, result, error = client.trigger_ingestion()
-        if success and result:
-            st.success("Ingestion pipeline completed successfully!")
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Scanned Links", result.get("scanned_links", 0))
-            m2.metric("Skipped (Already in DB)", result.get("skipped_existing_urls", 0))
-            m3.metric("Skipped (No Date)", result.get("skipped_missing_date", 0))
-            m4.metric("Skipped (Too Old)", result.get("skipped_too_old", 0))
-            m5.metric("Newly Ingested", result.get("ingested_count", 0))
-        else:
-            st.error(f"Ingestion pipeline failed: {error}")
-
 st.divider()
 
-# 3. Ingested Articles Feed
-st.subheader("📚 Ingested Articles (PostgreSQL Database)")
+# 2. Search & Source Filter Bar
+col_search, col_filter = st.columns([0.65, 0.35])
 
-articles = client.get_articles(limit=50)
+with col_search:
+    search_term = st.text_input(
+        "Search headlines",
+        placeholder="🔍 Type keywords (e.g. Claude, Gemini, reasoning, robotics)...",
+        label_visibility="collapsed",
+    )
 
-if not articles:
-    st.write("No articles ingested yet. Click **'Run Crawl4AI Ingestion'** above to fetch articles.")
+with col_filter:
+    all_sources = sorted(list({a.get("source") for a in articles if a.get("source")}))
+    selected_source = st.selectbox(
+        "Source Filter",
+        ["All Sources"] + all_sources,
+        label_visibility="collapsed",
+    )
+
+# Apply filters
+filtered_articles = []
+for a in articles:
+    # Source filter
+    if selected_source != "All Sources" and a.get("source") != selected_source:
+        continue
+
+    # Keyword filter
+    if search_term:
+        term = search_term.lower()
+        title_match = term in a.get("title", "").lower()
+        summary_match = term in (a.get("summary") or "").lower()
+        if not (title_match or summary_match):
+            continue
+
+    filtered_articles.append(a)
+
+st.write(f"Showing **{len(filtered_articles)}** of **{len(articles)}** articles")
+
+# 3. Editorial Article Cards
+if not filtered_articles:
+    st.info("No articles match your criteria. Click **'Fetch Latest News'** or adjust your filters.")
 else:
-    st.write(f"Displaying **{len(articles)}** articles stored in PostgreSQL:")
-    for art in articles:
+    for art in filtered_articles:
+        art_id = str(art.get("id"))
+        title = art.get("title") or "Untitled Story"
+        source_name = art.get("source") or "Unknown"
+        author = art.get("author") or source_name
+        published_date = str(art.get("published_at"))[:10]
+        summary = art.get("summary")
+        canonical_url = art.get("canonical_url", "#")
+
         with st.container(border=True):
-            col_title, col_meta = st.columns([0.7, 0.3])
-            with col_title:
-                st.markdown(f"### [{art.get('title')}]({art.get('canonical_url')})")
-                st.caption(
-                    f"**Source:** {art.get('source')} | "
-                    f"**Published:** {str(art.get('published_at'))[:10]} | "
-                    f"**Author:** {art.get('author') or 'Unknown'}"
+            # Header line: Source badge, date, author
+            st.markdown(
+                f"🏷️ **{source_name}** &nbsp;•&nbsp; 📅 `{published_date}` &nbsp;•&nbsp; ✍️ *{author}*"
+            )
+
+            # Headline
+            st.subheader(title)
+
+            # Summary snippet
+            if summary:
+                st.write(summary)
+            else:
+                st.caption("*No summary provided by source.*")
+
+            # Action bar: Original link & Newsletter selection
+            col_link, col_select = st.columns([0.7, 0.3])
+            with col_link:
+                st.link_button("Read Original Article ↗", canonical_url)
+            with col_select:
+                is_selected = st.checkbox(
+                    "Select for Newsletter",
+                    value=(art_id in st.session_state.selected_articles),
+                    key=f"check_{art_id}",
                 )
-            with col_meta:
-                st.caption(f"**UUID:** `{art.get('id')}`")
-                st.caption(f"**Ingested:** {str(art.get('created_at'))[:19]}")
-
-            if art.get("summary"):
-                st.write(art["summary"])
-
-            with st.expander("📄 View Extracted Markdown Content"):
-                st.markdown(art.get("article", "*No content*")[:3000] + ("..." if len(art.get("article", "")) > 3000 else ""))
+                if is_selected:
+                    st.session_state.selected_articles.add(art_id)
+                else:
+                    st.session_state.selected_articles.discard(art_id)
