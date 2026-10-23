@@ -1,0 +1,1 @@
+"""Multi-agent package: modular AI agents and pipeline orchestrator."""

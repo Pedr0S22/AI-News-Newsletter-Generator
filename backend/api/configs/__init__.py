@@ -1,0 +1,1 @@
+"""Core foundational module: configuration, database connection, and logging."""

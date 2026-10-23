@@ -1,0 +1,1 @@
+"""Prompt templates for AI news processing agents."""
