@@ -21,29 +21,26 @@ class Crawl4AIClient:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def crawl_url(self, url: str) -> Optional[dict[str, Any]]:
+    def crawl_url(self, url: str, exclude_chrome: bool = False) -> Optional[dict[str, Any]]:
         """Sends a URL to Crawl4AI /crawl and returns the first CrawlResult dictionary.
 
-        The Crawl4AI REST API returns:
-        {
-            "results": [
-                {
-                    "url": "https://...",
-                    "success": true,
-                    "status_code": 200,
-                    "error_message": null,
-                    "markdown": { "raw_markdown": "...", "fit_markdown": "..." },
-                    "metadata": { ... },
-                    "links": { "internal": [...], "external": [...] }
-                }
-            ]
-        }
+        When exclude_chrome=True, instructs Crawl4AI to exclude nav, footer,
+        header, and overlay elements to extract clean article markdown.
         """
         endpoint = f"{self.base_url}/crawl"
-        payload = {
+        crawler_config = {}
+        if exclude_chrome:
+            crawler_config = {
+                "excluded_tags": ["nav", "footer", "header", "aside", "form"],
+                "remove_overlay_elements": True,
+            }
+
+        payload: dict[str, Any] = {
             "urls": [url],
             "priority": 10,
         }
+        if crawler_config:
+            payload["crawler_config"] = crawler_config
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
@@ -95,4 +92,4 @@ class Crawl4AIClient:
 
     def scrape_article(self, url: str) -> Optional[dict[str, Any]]:
         """Scrapes full article content, clean Markdown, and metadata."""
-        return self.crawl_url(url)
+        return self.crawl_url(url, exclude_chrome=True)

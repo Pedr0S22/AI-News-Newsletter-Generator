@@ -28,7 +28,7 @@ class APIClient:
         """Triggers article ingestion pipeline on the backend."""
         url = f"{self.base_url}/articles/ingest"
         try:
-            with httpx.Client(timeout=120) as client:
+            with httpx.Client(timeout=300) as client:
                 res = client.post(url)
                 if res.status_code == 200:
                     return True, res.json(), None

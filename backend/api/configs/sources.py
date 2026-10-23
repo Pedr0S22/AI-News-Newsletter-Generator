@@ -17,7 +17,7 @@ SOURCES: list[NewsSource] = [
     NewsSource(
         name="Anthropic News",
         hub_url="https://anthropic.com/news",
-        article_url_pattern=r"^https://(www\.)?anthropic\.com/news/[a-zA-Z0-9_-]+/?$",
+        article_url_pattern=r"^https://(www\.)?anthropic\.com/news/(?!(product|announcements|company|research)/?$)[a-zA-Z0-9_-]+/?$",
     ),
     NewsSource(
         name="Google DeepMind",
@@ -42,6 +42,6 @@ SOURCES: list[NewsSource] = [
     NewsSource(
         name="Hugging Face Blog",
         hub_url="https://huggingface.co/blog",
-        article_url_pattern=r"^https://huggingface\.co/blog/[a-zA-Z0-9_-]+/?$"
+        article_url_pattern=r"^https://huggingface\.co/blog/(?!community/?$)[a-zA-Z0-9_-]+/?$"
     )
 ]

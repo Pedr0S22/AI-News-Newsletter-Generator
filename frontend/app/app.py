@@ -106,7 +106,10 @@ else:
 
             # Summary snippet
             if summary:
-                st.write(summary)
+                display_summary = summary.strip()
+                if len(display_summary) > 350:
+                    display_summary = display_summary[:347].rsplit(" ", 1)[0] + "..."
+                st.write(display_summary)
             else:
                 st.caption("*No summary provided by source.*")
 

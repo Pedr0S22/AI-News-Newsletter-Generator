@@ -8,7 +8,7 @@ router = APIRouter(tags=["Health"])
 @router.get("/health")
 def health_check():
     """Service healthcheck endpoint."""
-    logger.info("Health check endpoint queried.")
+    logger.debug("Health check endpoint queried.")
     return {
         "status": "healthy",
         "service": "ai-news-backend",

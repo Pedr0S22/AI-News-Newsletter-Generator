@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy.orm import Session
 
 from api.configs.config import settings
@@ -12,6 +13,50 @@ from api.services.ingestion.url_utils import normalize_url
 from api.services.ingestion.date_parser import parse_published_date
 
 logger = get_logger(__name__)
+
+GENERIC_TAGLINES = [
+    "we’re on a journey to advance and democratize artificial intelligence",
+    "we're on a journey to advance and democratize artificial intelligence",
+]
+
+EXCLUDED_CATEGORY_PATHS = {
+    "/news/product",
+    "/news/announcements",
+    "/news/company",
+    "/news/research",
+    "/index/overview",
+    "/blog/community",
+}
+
+
+def _clean_summary(raw_summary: Optional[str], markdown_content: str) -> Optional[str]:
+    """Extracts or trims a clean summary, falling back to first paragraph if missing or generic."""
+    candidate = (raw_summary or "").strip()
+
+    # If missing or generic boilerplate tagline, extract first meaningful paragraph
+    if not candidate or any(tagline in candidate.lower() for tagline in GENERIC_TAGLINES):
+        for line in markdown_content.split("\n"):
+            clean_line = line.strip()
+            if not clean_line:
+                continue
+            if clean_line.startswith(("#", "!", "[", "*", "-", ">", "|", "`", "http", "Site search")):
+                continue
+            if len(clean_line) >= 35:
+                candidate = clean_line
+                break
+
+    if not candidate:
+        return None
+
+    # Limit to 350 characters cleanly on a word boundary
+    if len(candidate) > 350:
+        truncated = candidate[:347]
+        last_space = truncated.rfind(" ")
+        if last_space > 250:
+            candidate = truncated[:last_space] + "..."
+        else:
+            candidate = truncated + "..."
+    return candidate
 
 
 class CrawlerService:
@@ -44,8 +89,11 @@ class CrawlerService:
 
             for raw_link in discovered_raw_links:
                 norm_link = normalize_url(raw_link, base_url=source.hub_url)
-                if norm_link and pattern.match(norm_link):
-                    candidates.add(norm_link)
+                if not norm_link or not pattern.match(norm_link):
+                    continue
+                if any(norm_link.rstrip("/").endswith(cat) for cat in EXCLUDED_CATEGORY_PATHS):
+                    continue
+                candidates.add(norm_link)
 
             candidate_urls = list(candidates)
             total_scanned += len(candidate_urls)
@@ -116,7 +164,8 @@ class CrawlerService:
                     continue
 
                 title = metadata.get("title") or metadata.get("og:title") or url
-                summary = metadata.get("description") or metadata.get("og:description") or None
+                raw_summary = metadata.get("description") or metadata.get("og:description") or None
+                summary = _clean_summary(raw_summary, markdown_content)
                 raw_author = metadata.get("author")
                 author = raw_author.strip() if raw_author and str(raw_author).strip() else source.name
 
