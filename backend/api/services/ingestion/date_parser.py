@@ -12,6 +12,11 @@ DATE_METADATA_KEYS = [
     "datePublished",
     "published_time",
     "publishedAt",
+    "publish_date",
+    "release_date",
+    "parsely-pub-date",
+    "sailthru.date",
+    "dc.date",
     "pubdate",
     "date",
 ]

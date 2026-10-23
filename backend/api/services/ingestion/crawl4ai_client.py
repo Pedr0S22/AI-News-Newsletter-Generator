@@ -48,6 +48,11 @@ class Crawl4AIClient:
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.post(endpoint, json=payload, headers=self.headers)
+                if response.status_code >= 400:
+                    logger.error(
+                        f"Crawl4AI returned HTTP {response.status_code} for '{url}'. "
+                        f"Response body: {response.text}"
+                    )
                 response.raise_for_status()
                 data = response.json()
 
