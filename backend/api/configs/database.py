@@ -31,6 +31,13 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     """Initializes tables in database."""
     try:
+        # Ensure all ORM entities are registered on Base.metadata before create_all
+        from api.models.entities import (  # noqa: F401
+            article,
+            article_evaluation,
+            newsletter,
+            source_reputation,
+        )
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully.")
     except Exception as e:

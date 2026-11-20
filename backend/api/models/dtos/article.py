@@ -31,4 +31,6 @@ class IngestResponse(BaseModel):
     skipped_missing_date: int
     skipped_too_old: int
     ingested_count: int
+    evaluated_count: int = 0
+    eliminated_count: int = 0
     ingested_articles: list[ArticleResponse]

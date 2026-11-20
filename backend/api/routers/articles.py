@@ -6,18 +6,27 @@ from api.configs.logging import get_logger
 from api.models.entities.article import Article
 from api.models.dtos.article import ArticleResponse, IngestResponse
 from api.services.ingestion.crawler_service import CrawlerService
+from api.services.newsletter_service import NewsletterService
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Articles"])
 
 
 @router.post("/ingest", response_model=IngestResponse)
-def trigger_ingestion(db: Session = Depends(get_db)):
-    """Triggers the Crawl4AI article ingestion and deduplication pipeline."""
+async def trigger_ingestion(db: Session = Depends(get_db)):
+    """Triggers Crawl4AI ingestion and automatically runs ADK Multi-Agent evaluation on new articles."""
     logger.info("HTTP POST /articles/ingest called.")
-    service = CrawlerService(db=db)
-    result = service.run_ingestion()
+    crawler = CrawlerService(db=db)
+    result = crawler.run_ingestion()
     logger.info(f"Ingestion finished: {result.ingested_count} new articles stored.")
+
+    # Automatically evaluate all unevaluated articles (newly ingested + any backlog)
+    nl_service = NewsletterService(db=db)
+    eval_summary = await nl_service.evaluate_unevaluated_articles()
+    result.evaluated_count = eval_summary.evaluated_count
+    result.eliminated_count = (
+        eval_summary.eliminated_topic_count + eval_summary.eliminated_duplicate_count
+    )
     return result
 
 

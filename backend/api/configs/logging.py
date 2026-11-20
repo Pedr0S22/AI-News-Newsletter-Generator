@@ -19,10 +19,18 @@ def setup_logging() -> None:
         force=True,
     )
 
-    # Suppress verbose noise from third-party network libraries
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    # Suppress verbose noise from third-party network & LLM libraries
+    for noisy_logger in (
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "primp",
+        "ddgs",
+        "LiteLLM",
+        "litellm",
+        "google_adk",
+    ):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:
