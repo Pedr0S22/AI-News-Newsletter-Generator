@@ -117,5 +117,6 @@ class AnalyticsResponse(BaseModel):
     editions_sent: int
     active_subscribers: int
     avg_top_n_retention_rate: Optional[float] = None
+    reorder_rate: Optional[float] = None
     unedited_approval_rate: Optional[float] = None
     avg_edit_ratio: Optional[float] = None

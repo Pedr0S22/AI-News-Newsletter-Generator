@@ -325,9 +325,10 @@ with tab_analytics:
     if not analytics:
         st.info("Analytics will appear once stories have been evaluated.")
     else:
-        # KPI Cards
-        k1, k2, k3, k4, k5 = st.columns(5)
+        # Row 1: Editorial Autonomy & HitL Impact (Proposal Section 5)
+        k1, k2, k3, k4 = st.columns(4)
         retention = analytics.get("avg_top_n_retention_rate")
+        reorder_rate = analytics.get("reorder_rate")
         unedited = analytics.get("unedited_approval_rate")
         avg_edit = analytics.get("avg_edit_ratio")
 
@@ -339,22 +340,35 @@ with tab_analytics:
             )
         with k2:
             st.metric(
+                "Ranking Reorder Rate",
+                f"{reorder_rate * 100:.0f}%" if reorder_rate is not None else "—",
+                help="Share of editions where the human editor changed the AI-suggested story order.",
+            )
+        with k3:
+            st.metric(
                 "Unedited Story Rate",
                 f"{unedited * 100:.0f}%" if unedited is not None else "—",
                 help="Share of drafted story blurbs approved with zero manual edits.",
             )
-        with k3:
+        with k4:
             st.metric(
                 "Avg Edit Intensity",
                 f"{avg_edit * 100:.1f}%" if avg_edit is not None else "—",
                 help="Average text change across subject, intro, story blurbs, and closing note.",
             )
-        with k4:
+
+        # Row 2: Pipeline & Publishing Totals
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Evaluated Stories", analytics.get("total_evaluated", 0))
+        with m2:
+            st.metric("Filtered Out (Hype/Topic/Dup)", analytics.get("total_eliminated", 0))
+        with m3:
             st.metric(
                 "Editions Sent",
                 f"{analytics.get('editions_sent', 0)} / {analytics.get('editions_drafted', 0)} drafted",
             )
-        with k5:
+        with m4:
             st.metric("Active Subscribers", analytics.get("active_subscribers", 0))
 
         st.divider()

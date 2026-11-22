@@ -340,7 +340,9 @@ class NewsletterService:
                     r_art.source, "rejected_top_n", r_art.title
                 )
 
-        for art in ordered_articles:
+        suggested_pos = {aid: idx for idx, aid in enumerate(req.suggested_top_n_ids)}
+
+        for new_pos, art in enumerate(ordered_articles):
             ev = eval_by_id.get(art.id)
             if ev:
                 ev.status = "human_approved"
@@ -348,6 +350,16 @@ class NewsletterService:
                 self.reputation_service.apply_hitl_feedback(
                     art.source, "promoted", art.title
                 )
+            elif art.id in suggested_pos:
+                orig_pos = suggested_pos[art.id]
+                if new_pos < orig_pos:
+                    self.reputation_service.apply_hitl_feedback(
+                        art.source, "reordered_up", art.title
+                    )
+                elif new_pos > orig_pos:
+                    self.reputation_service.apply_hitl_feedback(
+                        art.source, "reordered_down", art.title
+                    )
 
         # Compute Proposal Section 5 Curation Metrics
         kept_from_suggested = [aid for aid in selected_ids if aid in suggested_set]
@@ -671,6 +683,12 @@ class NewsletterService:
             if isinstance(n.hitl_metrics, dict)
             and "top_n_retention_rate" in n.hitl_metrics
         ]
+        reorder_vals = [
+            1.0 if n.hitl_metrics.get("reordered") else 0.0
+            for n in newsletters
+            if isinstance(n.hitl_metrics, dict)
+            and "reordered" in n.hitl_metrics
+        ]
         unedited_vals = [
             float(n.hitl_metrics["unedited_items_ratio"])
             for n in newsletters
@@ -697,6 +715,11 @@ class NewsletterService:
             avg_top_n_retention_rate=(
                 round(sum(retention_vals) / len(retention_vals), 4)
                 if retention_vals
+                else None
+            ),
+            reorder_rate=(
+                round(sum(reorder_vals) / len(reorder_vals), 4)
+                if reorder_vals
                 else None
             ),
             unedited_approval_rate=(

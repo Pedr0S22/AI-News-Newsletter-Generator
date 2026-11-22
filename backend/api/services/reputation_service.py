@@ -13,6 +13,8 @@ DELTA_ACCEPT_UNTOUCHED = 0.05
 DELTA_ACCEPT_EDITED = 0.01
 DELTA_REJECT_FROM_TOP_N = -0.08
 DELTA_PROMOTE_RESCUE = 0.05
+DELTA_REORDERED_UP = 0.02
+DELTA_REORDERED_DOWN = -0.02
 
 
 class ReputationService:
@@ -93,12 +95,16 @@ class ReputationService:
         - 'accepted_edited': +0.01
         - 'rejected_top_n': -0.08
         - 'promoted': +0.05
+        - 'reordered_up': +0.02
+        - 'reordered_down': -0.02
         """
         delta_map = {
             "accepted_untouched": DELTA_ACCEPT_UNTOUCHED,
             "accepted_edited": DELTA_ACCEPT_EDITED,
             "rejected_top_n": DELTA_REJECT_FROM_TOP_N,
             "promoted": DELTA_PROMOTE_RESCUE,
+            "reordered_up": DELTA_REORDERED_UP,
+            "reordered_down": DELTA_REORDERED_DOWN,
         }
         delta = delta_map.get(event, 0.0)
         rep = self.get_or_create_source(source_name)
