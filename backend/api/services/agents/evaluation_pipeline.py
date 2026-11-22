@@ -1,12 +1,14 @@
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from google.adk.agents import Agent, ParallelAgent
+from google.adk.agents import Agent, ParallelAgent, SequentialAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from api.configs.config import settings
 from api.configs.logging import get_logger
 from api.models.dtos.evaluation import (
     DeduplicationAgentOutput,
@@ -45,7 +47,7 @@ class ArticleAuditResult:
 
 
 async def _run_adk_agent(agent: Any, prompt: str) -> tuple[str, dict[str, Any]]:
-    """Executes an ADK Agent or ParallelAgent in an isolated in-memory session."""
+    """Executes an ADK Agent, SequentialAgent, or ParallelAgent in an isolated in-memory session."""
     session_service = InMemorySessionService()
     session_id = f"eval_{uuid.uuid4().hex}"
     user_id = "editorial_system"
@@ -93,18 +95,27 @@ async def evaluate_single_article(
     article: Article,
     corroboration_evidence: list[dict[str, str]],
     dedup_candidates: list[dict[str, Any]],
+    progress_label: str = "",
 ) -> ArticleAuditResult:
     """Runs the 3-stage Google ADK evaluation pipeline for one article:
       1. Topic Gate Agent (AI relevance filter)
-      2. ParallelAgent([Hype Agent, Factuality Agent])
+      2. Hype + Factuality Auditors (SequentialAgent for local Ollama GPU, ParallelAgent for cloud)
       3. Deduplication Agent (against all existing DB articles)
     """
+    t_start = time.monotonic()
+    tag = f"[Eval {progress_label}]" if progress_label else "[Eval]"
+    provider = (settings.EVAL_LLM_PROVIDER or "ollama").strip().lower()
+    model_desc = f"ollama/{settings.OLLAMA_MODEL}" if provider == "ollama" else "iaedu/gpt-5.5"
+
+    logger.info(f"{tag} Starting '{article.title[:65]}' ({article.source}) via {model_desc}")
+
     llm = get_eval_llm()
     article_block = _article_context_block(article)
 
     # ------------------------------------------------------------------
     # Stage 1: Topic Gate Agent
     # ------------------------------------------------------------------
+    t0 = time.monotonic()
     topic_agent = Agent(
         name="topic_gate_agent",
         model=llm,
@@ -115,15 +126,23 @@ async def evaluate_single_article(
     try:
         topic_out = TopicAgentOutput.model_validate(topic_json)
     except Exception as exc:
-        logger.warning(f"TopicAgent parse fallback for '{article.title[:50]}': {exc}")
+        logger.warning(f"{tag} TopicAgent parse fallback for '{article.title[:50]}': {exc}")
         topic_out = TopicAgentOutput(
             is_ai_topic=True,
             primary_theme="Enterprise & Product AI",
             reason="Defaulted to AI topic after ambiguous classification.",
         )
 
+    logger.info(
+        f"{tag} Topic Gate -> {'AI' if topic_out.is_ai_topic else 'OFF-TOPIC'} "
+        f"({topic_out.primary_theme}) [{time.monotonic() - t0:.1f}s]"
+    )
+
     if not topic_out.is_ai_topic:
-        logger.info(f"[Topic Gate] Eliminated off-topic article: '{article.title[:60]}'")
+        logger.info(
+            f"{tag} Eliminated off-topic article in {time.monotonic() - t_start:.1f}s: "
+            f"'{article.title[:60]}'"
+        )
         return ArticleAuditResult(
             is_ai_topic=False,
             primary_theme=topic_out.primary_theme,
@@ -131,8 +150,10 @@ async def evaluate_single_article(
         )
 
     # ------------------------------------------------------------------
-    # Stage 2: ParallelAgent (Hype + Factuality running concurrently)
+    # Stage 2: Hype + Factuality Auditors
+    # Sequential on local Ollama GPU to prevent VRAM contention; Parallel on cloud APIs
     # ------------------------------------------------------------------
+    t0 = time.monotonic()
     evidence_str = (
         json.dumps(corroboration_evidence, indent=2)
         if corroboration_evidence
@@ -155,10 +176,17 @@ async def evaluate_single_article(
         output_key="factuality_json",
         instruction=FACTUALITY_AGENT_PROMPT,
     )
-    audit_team = ParallelAgent(
-        name="article_auditors",
-        sub_agents=[hype_agent, factuality_agent],
-    )
+
+    if provider == "ollama":
+        audit_team = SequentialAgent(
+            name="article_auditors_sequential",
+            sub_agents=[hype_agent, factuality_agent],
+        )
+    else:
+        audit_team = ParallelAgent(
+            name="article_auditors",
+            sub_agents=[hype_agent, factuality_agent],
+        )
 
     _, audit_state = await _run_adk_agent(audit_team, audit_prompt)
 
@@ -166,7 +194,7 @@ async def evaluate_single_article(
     try:
         hype_out = HypeAgentOutput.model_validate(hype_parsed)
     except Exception as exc:
-        logger.warning(f"HypeAgent parse fallback for '{article.title[:50]}': {exc}")
+        logger.warning(f"{tag} HypeAgent parse fallback for '{article.title[:50]}': {exc}")
         hype_out = HypeAgentOutput(
             hype_score=4.0,
             reason="Moderate baseline score assigned due to structured parse fallback.",
@@ -176,15 +204,22 @@ async def evaluate_single_article(
     try:
         fact_out = FactualityAgentOutput.model_validate(fact_parsed)
     except Exception as exc:
-        logger.warning(f"FactualityAgent parse fallback for '{article.title[:50]}': {exc}")
+        logger.warning(f"{tag} FactualityAgent parse fallback for '{article.title[:50]}': {exc}")
         fact_out = FactualityAgentOutput(
             factuality_score=7.0,
             reason="Baseline factual score assigned from primary-source publication.",
         )
 
+    logger.info(
+        f"{tag} Auditors -> Hype: {hype_out.hype_score:.1f}/10 | "
+        f"Factuality: {fact_out.factuality_score:.1f}/10 "
+        f"({len(corroboration_evidence)} refs) [{time.monotonic() - t0:.1f}s]"
+    )
+
     # ------------------------------------------------------------------
     # Stage 3: Deduplication Agent (vs. ALL articles in PostgreSQL)
     # ------------------------------------------------------------------
+    t0 = time.monotonic()
     dedup_out = DeduplicationAgentOutput(
         is_duplicate=False,
         duplicate_of_article_id=None,
@@ -209,12 +244,16 @@ async def evaluate_single_article(
         dedup_parsed = extract_json_object(dedup_raw) or {}
         try:
             dedup_out = DeduplicationAgentOutput.model_validate(dedup_parsed)
-            # Validate duplicate_of_article_id actually points to a real candidate
             valid_ids = {c["article_id"] for c in dedup_candidates}
             if dedup_out.is_duplicate and dedup_out.duplicate_of_article_id not in valid_ids:
                 dedup_out.duplicate_of_article_id = None
         except Exception as exc:
-            logger.warning(f"DeduplicationAgent parse fallback for '{article.title[:50]}': {exc}")
+            logger.warning(f"{tag} DeduplicationAgent parse fallback for '{article.title[:50]}': {exc}")
+
+    logger.info(
+        f"{tag} Dedup -> Duplicate: {dedup_out.is_duplicate} "
+        f"[{time.monotonic() - t0:.1f}s] | Article total: {time.monotonic() - t_start:.1f}s"
+    )
 
     return ArticleAuditResult(
         is_ai_topic=True,

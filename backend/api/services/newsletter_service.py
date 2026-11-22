@@ -77,9 +77,13 @@ class NewsletterService:
                 failed_count=0,
             )
 
+        provider = (settings.EVAL_LLM_PROVIDER or "ollama").strip().lower()
+        effective_concurrency = (
+            1 if provider == "ollama" else max(1, settings.AGENT_MAX_CONCURRENCY)
+        )
         logger.info(
             f"Running ADK Multi-Agent Evaluation on {len(pending_articles)} unevaluated articles "
-            f"(max concurrency={settings.AGENT_MAX_CONCURRENCY})..."
+            f"(provider={provider}, concurrency={effective_concurrency})..."
         )
 
         # Pre-compute deduplication candidate snapshots on the main DB thread
@@ -90,9 +94,12 @@ class NewsletterService:
             dedup_map[art.id] = select_dedup_candidates(art, seen_earlier)
             seen_earlier.append(art)
 
-        semaphore = asyncio.Semaphore(max(1, settings.AGENT_MAX_CONCURRENCY))
+        semaphore = asyncio.Semaphore(effective_concurrency)
+        total_pending = len(pending_articles)
 
-        async def _worker(art: Article) -> tuple[Article, Optional[ArticleAuditResult], Optional[Exception]]:
+        async def _worker(
+            idx: int, art: Article
+        ) -> tuple[Article, Optional[ArticleAuditResult], Optional[Exception]]:
             async with semaphore:
                 try:
                     evidence = await asyncio.to_thread(
@@ -102,13 +109,16 @@ class NewsletterService:
                         article=art,
                         corroboration_evidence=evidence,
                         dedup_candidates=dedup_map.get(art.id, []),
+                        progress_label=f"{idx}/{total_pending}",
                     )
                     return art, audit, None
                 except Exception as exc:
                     logger.error(f"Evaluation failed for article '{art.title[:60]}': {exc}")
                     return art, None, exc
 
-        results = await asyncio.gather(*(_worker(a) for a in pending_articles))
+        results = await asyncio.gather(
+            *(_worker(i, a) for i, a in enumerate(pending_articles, start=1))
+        )
 
         ranked_count = 0
         eliminated_topic_count = 0
@@ -168,6 +178,10 @@ class NewsletterService:
                 status=status,
             )
             self.db.add(eval_row)
+            logger.info(
+                f"[Eval Saved] '{art.title[:55]}' | Status: {status} | "
+                f"Ranking: {final_rank:.2f} (Rep: {rep.reputation_score:.2f}x)"
+            )
 
         self.db.commit()
         evaluated_total = ranked_count + eliminated_topic_count + eliminated_duplicate_count

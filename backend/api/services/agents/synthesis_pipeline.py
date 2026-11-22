@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from typing import Any
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
@@ -100,16 +101,41 @@ async def synthesize_newsletter_draft(
         auto_create_session=True,
     )
 
+    provider = (settings.WRITER_LLM_PROVIDER or "iaedu").strip().lower()
+    model_desc = "iaedu/gpt-5.5" if provider == "iaedu" else f"ollama/{settings.OLLAMA_MODEL}"
+    t_start = time.monotonic()
     logger.info(
-        f"Starting ADK Writer + Reflection pipeline for {len(curated_articles)} curated articles..."
+        f"[Synthesis] Starting ADK Writer + Reflection pipeline for {len(curated_articles)} "
+        f"curated articles via {model_desc}..."
     )
+    reflection_round = 0
     async for event in runner.run_async(
         user_id=user_id,
         session_id=session_id,
         new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
     ):
         for call in event.get_function_calls():
-            logger.info(f"[ADK Synthesis Tool] [{event.author}] {call.name}({call.args})")
+            logger.info(f"[Synthesis] [{event.author}] Tool called -> {call.name}({call.args})")
+
+        if event.is_final_response() and event.content and event.content.parts:
+            text = "".join(p.text or "" for p in event.content.parts).strip()
+            if event.author == "journalistic_writer":
+                logger.info(
+                    f"[Synthesis] Writer draft generated ({len(text)} chars) "
+                    f"[{time.monotonic() - t_start:.1f}s]"
+                )
+            elif event.author == "editorial_critic" and text:
+                reflection_round += 1
+                logger.info(
+                    f"[Synthesis] Critic round #{reflection_round} feedback: {text[:220]}"
+                )
+            elif event.author == "editorial_reviser":
+                logger.info(
+                    f"[Synthesis] Reviser round #{reflection_round} updated draft "
+                    f"({len(text)} chars) [{time.monotonic() - t_start:.1f}s]"
+                )
+
+    logger.info(f"[Synthesis] Pipeline finished in {time.monotonic() - t_start:.1f}s.")
 
     session = await session_service.get_session(
         app_name=_APP_NAME, user_id=user_id, session_id=session_id

@@ -262,7 +262,11 @@ def get_iaedu_llm() -> IAeduLlm:
 
 def get_ollama_llm() -> BaseLlm:
     """Factory returning a Google ADK LiteLlm connected to local Ollama (host GPU)."""
+    import litellm
     from google.adk.models.lite_llm import LiteLlm
+
+    litellm.suppress_debug_info = True
+    litellm.set_verbose = False
 
     kwargs: dict[str, Any] = {
         "model": f"openai/{settings.OLLAMA_MODEL}",
