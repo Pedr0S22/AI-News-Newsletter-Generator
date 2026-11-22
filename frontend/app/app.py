@@ -326,9 +326,10 @@ with tab_analytics:
         st.info("Analytics will appear once stories have been evaluated.")
     else:
         # KPI Cards
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5 = st.columns(5)
         retention = analytics.get("avg_top_n_retention_rate")
         unedited = analytics.get("unedited_approval_rate")
+        avg_edit = analytics.get("avg_edit_ratio")
 
         with k1:
             st.metric(
@@ -338,16 +339,22 @@ with tab_analytics:
             )
         with k2:
             st.metric(
-                "Unedited Approval Rate",
+                "Unedited Story Rate",
                 f"{unedited * 100:.0f}%" if unedited is not None else "—",
-                help="Share of drafted stories approved without manual copy edits.",
+                help="Share of drafted story blurbs approved with zero manual edits.",
             )
         with k3:
+            st.metric(
+                "Avg Edit Intensity",
+                f"{avg_edit * 100:.1f}%" if avg_edit is not None else "—",
+                help="Average text change across subject, intro, story blurbs, and closing note.",
+            )
+        with k4:
             st.metric(
                 "Editions Sent",
                 f"{analytics.get('editions_sent', 0)} / {analytics.get('editions_drafted', 0)} drafted",
             )
-        with k4:
+        with k5:
             st.metric("Active Subscribers", analytics.get("active_subscribers", 0))
 
         st.divider()

@@ -25,7 +25,7 @@ def render_newsletter_view(newsletter: dict[str, Any]):
         unsafe_allow_html=True,
     )
 
-    view_preview, view_edit = st.tabs(["👁️ Reader Preview", "✏️ Edit & Approve Copy"])
+    view_preview, view_edit = st.tabs(["👁️ Reader Preview", "✏️ Edit Draft"])
 
     # ------------------------------------------------------------------
     # Sub-tab 1: Rendered HTML Email Preview (Zero internal scores!)
@@ -37,8 +37,22 @@ def render_newsletter_view(newsletter: dict[str, Any]):
         full_html = newsletter.get("full_html") or ""
         components.html(full_html, height=760, scrolling=True)
 
-        dl_col1, dl_col2, _ = st.columns([0.25, 0.25, 0.5])
-        with dl_col1:
+        act_c1, act_c2, act_c3 = st.columns([0.34, 0.33, 0.33])
+        with act_c1:
+            if status == "DRAFT":
+                if st.button(
+                    "✅ Approve Edition",
+                    type="primary",
+                    key=f"btn_approve_preview_{nl_id}",
+                    use_container_width=True,
+                ):
+                    ok, _, err = client.approve_newsletter(nl_id)
+                    if ok:
+                        st.toast("Edition approved! Source trust and metrics updated.", icon="✅")
+                        st.rerun()
+                    else:
+                        st.error(f"Could not approve edition: {err}")
+        with act_c2:
             st.download_button(
                 "⬇️ Download HTML",
                 data=full_html,
@@ -46,7 +60,7 @@ def render_newsletter_view(newsletter: dict[str, Any]):
                 mime="text/html",
                 use_container_width=True,
             )
-        with dl_col2:
+        with act_c3:
             st.download_button(
                 "⬇️ Download Markdown",
                 data=newsletter.get("full_markdown") or "",
@@ -56,11 +70,12 @@ def render_newsletter_view(newsletter: dict[str, Any]):
             )
 
     # ------------------------------------------------------------------
-    # Sub-tab 2: Structured JSON Inline Editor (Intro, Blurbs, Outro)
+    # Sub-tab 2: Structured JSON Inline Editor (Save Changes vs Approve)
     # ------------------------------------------------------------------
     with view_edit:
         st.caption(
-            "Adjust the headline, introduction, individual story blurbs, or closing note before approving."
+            "Edit any section below and click **Save Changes** (or press Enter / Ctrl+Enter). "
+            "Saving edits will NOT approve the edition until you explicitly click **Approve Edition**."
         )
 
         with st.form(key=f"edit_newsletter_form_{nl_id}"):
@@ -117,10 +132,11 @@ def render_newsletter_view(newsletter: dict[str, Any]):
                 height=80,
             )
 
-            submitted = st.form_submit_button(
-                "✅ Save & Approve Edition", type="primary", use_container_width=True
+            # Form submit (and Enter / Ctrl+Enter) ONLY saves edits—never approves!
+            saved = st.form_submit_button(
+                "💾 Save Changes", use_container_width=True
             )
-            if submitted:
+            if saved:
                 payload = {
                     "edition_title": edition_title,
                     "subject": subject,
@@ -128,12 +144,32 @@ def render_newsletter_view(newsletter: dict[str, Any]):
                     "blurbs": updated_blurbs,
                     "outro": outro,
                 }
-                ok, _, err = client.approve_newsletter(nl_id, payload)
+                ok, _, err = client.save_newsletter_draft(nl_id, payload)
                 if ok:
-                    st.toast("Edition saved and approved! Source trust updated.", icon="✅")
+                    st.toast("Changes saved! Review the preview or click Approve Edition when ready.", icon="💾")
                     st.rerun()
                 else:
                     st.error(f"Could not save changes: {err}")
+
+        # Explicit standalone approval button OUTSIDE the form
+        st.markdown("")
+        if status == "DRAFT":
+            if st.button(
+                "✅ Approve Edition",
+                type="primary",
+                key=f"btn_approve_edit_{nl_id}",
+                use_container_width=True,
+            ):
+                ok, _, err = client.approve_newsletter(nl_id)
+                if ok:
+                    st.toast("Edition approved! Source trust and editorial metrics updated.", icon="✅")
+                    st.rerun()
+                else:
+                    st.error(f"Could not approve edition: {err}")
+        elif status == "APPROVED":
+            st.success("This edition is already approved and ready to send below.")
+        else:
+            st.info("This edition has already been sent to subscribers.")
 
     st.divider()
 

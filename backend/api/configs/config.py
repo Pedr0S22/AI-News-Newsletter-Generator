@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Local Ollama (Host GPU)
     OLLAMA_BASE_URL: str = "http://host.docker.internal:11434/v1"
-    OLLAMA_MODEL: str = "qwen3:8b"
+    OLLAMA_MODEL: str = "gemma4:e4b"
     OLLAMA_REASONING_EFFORT: str = "none"
 
     # Multi-Agent Evaluation & Ranking

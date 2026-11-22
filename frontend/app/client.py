@@ -107,13 +107,31 @@ class APIClient:
         except Exception:
             return None
 
-    def approve_newsletter(
+    def save_newsletter_draft(
         self, newsletter_id: str, structured_content: dict[str, Any]
     ) -> tuple[bool, Optional[dict[str, Any]], Optional[str]]:
-        url = f"{self.base_url}/newsletters/{newsletter_id}/approve"
+        """Saves inline editorial edits to a newsletter without approving it."""
+        url = f"{self.base_url}/newsletters/{newsletter_id}"
         try:
             with httpx.Client(timeout=30) as client:
                 res = client.patch(url, json={"structured_content": structured_content})
+                if res.status_code == 200:
+                    return True, res.json(), None
+                return False, None, f"HTTP {res.status_code}: {res.text}"
+        except Exception as e:
+            return False, None, str(e)
+
+    def approve_newsletter(
+        self,
+        newsletter_id: str,
+        structured_content: Optional[dict[str, Any]] = None,
+    ) -> tuple[bool, Optional[dict[str, Any]], Optional[str]]:
+        """Explicitly approves a newsletter edition and records Section 5 HitL metrics."""
+        url = f"{self.base_url}/newsletters/{newsletter_id}/approve"
+        payload = {"structured_content": structured_content} if structured_content is not None else {}
+        try:
+            with httpx.Client(timeout=30) as client:
+                res = client.patch(url, json=payload)
                 if res.status_code == 200:
                     return True, res.json(), None
                 return False, None, f"HTTP {res.status_code}: {res.text}"

@@ -21,6 +21,7 @@ from api.models.dtos.newsletter import (
     NewsletterResponse,
     NewsletterStructuredContent,
     NewsletterSummaryDTO,
+    SaveDraftRequest,
     SendNewsletterResponse,
 )
 from api.models.entities.article import Article
@@ -401,6 +402,7 @@ class NewsletterService:
                 "reordered": reordered,
                 "avg_edit_ratio": 0.0,
                 "unedited_items_ratio": 1.0,
+                "ai_draft_snapshot": structured.model_dump(),
             },
         )
         self.db.add(nl)
@@ -431,63 +433,131 @@ class NewsletterService:
         return NewsletterResponse.model_validate(nl)
 
     # ==========================================================================
-    # 4. Human Inline Edit, Approval & Section 5 Metrics
+    # 4. Human Inline Edit (Save Only) & Explicit Approval + Section 5 Metrics
     # ==========================================================================
 
-    def approve_newsletter(
-        self, newsletter_id: uuid.UUID, req: ApproveNewsletterRequest
+    @staticmethod
+    def _flatten_edition_text(content_dict: dict[str, Any]) -> str:
+        parts = [
+            str(content_dict.get("edition_title") or "").strip(),
+            str(content_dict.get("subject") or "").strip(),
+            str(content_dict.get("intro") or "").strip(),
+        ]
+        for b in content_dict.get("blurbs") or []:
+            if isinstance(b, dict):
+                parts.append(str(b.get("headline") or "").strip())
+                parts.append(str(b.get("theme") or "").strip())
+                parts.append(str(b.get("body") or "").strip())
+        parts.append(str(content_dict.get("outro") or "").strip())
+        return "\n".join(parts)
+
+    def _apply_structured_edits(
+        self, nl: Newsletter, structured: NewsletterStructuredContent
+    ) -> None:
+        """Persists edits and computes exact story-level & edition-wide diff metrics."""
+        metrics = dict(nl.hitl_metrics or {})
+        snapshot = metrics.get("ai_draft_snapshot") or nl.structured_content or {}
+        snapshot_blurbs = {
+            str(b.get("article_id")): b
+            for b in (snapshot.get("blurbs") or [])
+            if isinstance(b, dict)
+        }
+        blurb_by_article_id = {b.article_id: b for b in structured.blurbs}
+
+        unedited_count = 0
+        total_items = 0
+
+        for item in nl.items:
+            updated_blurb = blurb_by_article_id.get(str(item.article_id))
+            if not updated_blurb:
+                continue
+            total_items += 1
+
+            orig_b = snapshot_blurbs.get(str(item.article_id)) or {}
+            orig_headline = str(orig_b.get("headline") or item.headline or "").strip()
+            orig_theme = str(orig_b.get("theme") or item.theme or "").strip()
+            orig_body = str(orig_b.get("body") or item.ai_generated_body or "").strip()
+
+            new_headline = updated_blurb.headline.strip()
+            new_theme = updated_blurb.theme.strip()
+            new_body = updated_blurb.body.strip()
+
+            item.headline = new_headline
+            item.theme = new_theme
+            item.human_approved_body = new_body
+
+            ai_combined = f"{orig_headline}\n{orig_theme}\n{orig_body}".strip()
+            human_combined = f"{new_headline}\n{new_theme}\n{new_body}".strip()
+
+            similarity = difflib.SequenceMatcher(None, ai_combined, human_combined).ratio()
+            ratio = round(1.0 - similarity, 4)
+            item.edit_ratio = ratio
+            item.was_edited = ai_combined != human_combined
+            if not item.was_edited:
+                unedited_count += 1
+
+        new_dict = structured.model_dump()
+        ai_full_text = self._flatten_edition_text(snapshot)
+        human_full_text = self._flatten_edition_text(new_dict)
+        edition_edit_ratio = round(
+            1.0 - difflib.SequenceMatcher(None, ai_full_text, human_full_text).ratio(),
+            4,
+        )
+
+        nl.edition_title = structured.edition_title.strip()
+        nl.subject = structured.subject.strip()
+        nl.structured_content = new_dict
+        nl.full_markdown = self.email_service.render_markdown(structured)
+        nl.full_html = self.email_service.render_html(structured)
+
+        metrics["avg_edit_ratio"] = edition_edit_ratio
+        if total_items > 0:
+            metrics["unedited_items_ratio"] = round(unedited_count / total_items, 4)
+        if "ai_draft_snapshot" not in metrics:
+            metrics["ai_draft_snapshot"] = snapshot
+        nl.hitl_metrics = metrics
+
+    def save_newsletter_draft(
+        self, newsletter_id: uuid.UUID, req: SaveDraftRequest
     ) -> NewsletterResponse:
+        """Saves inline editorial edits without approving the edition or touching reputation."""
+        nl = self.db.query(Newsletter).filter(Newsletter.id == newsletter_id).first()
+        if not nl:
+            raise ValueError("Newsletter edition not found.")
+
+        self._apply_structured_edits(nl, req.structured_content)
+        self.db.commit()
+        self.db.refresh(nl)
+        return NewsletterResponse.model_validate(nl)
+
+    def approve_newsletter(
+        self,
+        newsletter_id: uuid.UUID,
+        req: Optional[ApproveNewsletterRequest] = None,
+    ) -> NewsletterResponse:
+        """Explicitly approves a newsletter edition and applies Source Trust acceptance feedback."""
         nl = self.db.query(Newsletter).filter(Newsletter.id == newsletter_id).first()
         if not nl:
             raise ValueError("Newsletter edition not found.")
 
         was_already_approved = nl.status in ("approved", "sent")
-        structured = req.structured_content
-        blurb_by_article_id = {b.article_id: b for b in structured.blurbs}
 
-        edit_ratios: list[float] = []
-        unedited_count = 0
+        if req and req.structured_content is not None:
+            self._apply_structured_edits(nl, req.structured_content)
+        else:
+            current_structured = NewsletterStructuredContent.model_validate(nl.structured_content)
+            self._apply_structured_edits(nl, current_structured)
 
-        for item in nl.items:
-            updated_blurb = blurb_by_article_id.get(str(item.article_id))
-            if updated_blurb:
-                item.headline = updated_blurb.headline.strip()
-                item.theme = updated_blurb.theme.strip()
-                item.human_approved_body = updated_blurb.body.strip()
+        if not was_already_approved:
+            for item in nl.items:
+                event_name = "accepted_edited" if item.was_edited else "accepted_untouched"
+                self.reputation_service.apply_hitl_feedback(
+                    item.source_name, event_name, item.headline
+                )
 
-                similarity = difflib.SequenceMatcher(
-                    None,
-                    (item.ai_generated_body or "").strip(),
-                    item.human_approved_body,
-                ).ratio()
-                ratio = round(1.0 - similarity, 4)
-                item.edit_ratio = ratio
-                item.was_edited = ratio > 0.02
-                edit_ratios.append(ratio)
-                if not item.was_edited:
-                    unedited_count += 1
-
-                # Apply reputation acceptance feedback only once upon initial approval
-                if not was_already_approved:
-                    event_name = "accepted_edited" if item.was_edited else "accepted_untouched"
-                    self.reputation_service.apply_hitl_feedback(
-                        item.source_name, event_name, item.headline
-                    )
-
-        nl.edition_title = structured.edition_title.strip()
-        nl.subject = structured.subject.strip()
-        nl.structured_content = structured.model_dump()
-        nl.full_markdown = self.email_service.render_markdown(structured)
-        nl.full_html = self.email_service.render_html(structured)
         if nl.status != "sent":
             nl.status = "approved"
         nl.approved_at = datetime.now(timezone.utc)
-
-        metrics = dict(nl.hitl_metrics or {})
-        if edit_ratios:
-            metrics["avg_edit_ratio"] = round(sum(edit_ratios) / len(edit_ratios), 4)
-            metrics["unedited_items_ratio"] = round(unedited_count / len(edit_ratios), 4)
-        nl.hitl_metrics = metrics
 
         self.db.commit()
         self.db.refresh(nl)

@@ -1,5 +1,6 @@
+from typing import Optional
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.configs.database import get_db
@@ -9,6 +10,7 @@ from api.models.dtos.newsletter import (
     DraftNewsletterRequest,
     NewsletterResponse,
     NewsletterSummaryDTO,
+    SaveDraftRequest,
     SendNewsletterRequest,
     SendNewsletterResponse,
     SubscriberCreateRequest,
@@ -101,13 +103,27 @@ def get_newsletter(newsletter_id: uuid.UUID, db: Session = Depends(get_db)):
     return nl
 
 
+@router.patch("/{newsletter_id}", response_model=NewsletterResponse)
+def save_newsletter_draft(
+    newsletter_id: uuid.UUID,
+    req: SaveDraftRequest,
+    db: Session = Depends(get_db),
+):
+    """Saves inline human edits to a draft without approving it."""
+    service = NewsletterService(db=db)
+    try:
+        return service.save_newsletter_draft(newsletter_id, req)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.patch("/{newsletter_id}/approve", response_model=NewsletterResponse)
 def approve_newsletter(
     newsletter_id: uuid.UUID,
-    req: ApproveNewsletterRequest,
+    req: Optional[ApproveNewsletterRequest] = Body(default=None),
     db: Session = Depends(get_db),
 ):
-    """Saves human edits, computes Section 5 edit metrics, updates reputation, and approves edition."""
+    """Explicitly approves a newsletter edition, records Section 5 edit metrics, and updates reputation."""
     service = NewsletterService(db=db)
     try:
         return service.approve_newsletter(newsletter_id, req)

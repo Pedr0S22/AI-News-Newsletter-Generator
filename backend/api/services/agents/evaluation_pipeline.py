@@ -28,7 +28,8 @@ from api.services.agents.prompts.templates import (
 logger = get_logger(__name__)
 
 _APP_NAME = "ai_news_evaluator"
-_MAX_ARTICLE_CHARS = 7000
+_MAX_TOPIC_CHARS = 1200
+_MAX_AUDIT_CHARS = 4500
 
 
 @dataclass
@@ -77,8 +78,8 @@ async def _run_adk_agent(agent: Any, prompt: str) -> tuple[str, dict[str, Any]]:
     return final_text, state
 
 
-def _article_context_block(article: Article) -> str:
-    body = (article.article or "").strip()[:_MAX_ARTICLE_CHARS]
+def _article_context_block(article: Article, max_chars: int = _MAX_AUDIT_CHARS) -> str:
+    body = (article.article or "").strip()[:max_chars]
     pub_str = article.published_at.strftime("%Y-%m-%d") if article.published_at else "Unknown"
     return (
         f"TITLE: {article.title}\n"
@@ -110,10 +111,11 @@ async def evaluate_single_article(
     logger.info(f"{tag} Starting '{article.title[:65]}' ({article.source}) via {model_desc}")
 
     llm = get_eval_llm()
-    article_block = _article_context_block(article)
+    topic_block = _article_context_block(article, max_chars=_MAX_TOPIC_CHARS)
+    article_block = _article_context_block(article, max_chars=_MAX_AUDIT_CHARS)
 
     # ------------------------------------------------------------------
-    # Stage 1: Topic Gate Agent
+    # Stage 1: Topic Gate Agent (fast short context)
     # ------------------------------------------------------------------
     t0 = time.monotonic()
     topic_agent = Agent(
@@ -121,7 +123,7 @@ async def evaluate_single_article(
         model=llm,
         instruction=TOPIC_GATE_PROMPT,
     )
-    topic_raw, _ = await _run_adk_agent(topic_agent, article_block)
+    topic_raw, _ = await _run_adk_agent(topic_agent, topic_block)
     topic_json = extract_json_object(topic_raw) or {}
     try:
         topic_out = TopicAgentOutput.model_validate(topic_json)

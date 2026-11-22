@@ -39,8 +39,12 @@ class DraftNewsletterRequest(BaseModel):
     edition_title: Optional[str] = None
 
 
-class ApproveNewsletterRequest(BaseModel):
+class SaveDraftRequest(BaseModel):
     structured_content: NewsletterStructuredContent
+
+
+class ApproveNewsletterRequest(BaseModel):
+    structured_content: Optional[NewsletterStructuredContent] = None
 
 
 class SendNewsletterRequest(BaseModel):
